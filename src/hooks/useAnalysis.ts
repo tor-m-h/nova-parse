@@ -13,18 +13,32 @@ export function useAnalyzeManual() {
         .update({ status: 'analyserer' })
         .eq('id', manual.id)
 
-      // Fetch the file content
+      // Fetch the file content from Supabase Storage
       if (!manual.fil_url) {
         throw new Error('Ingen fil-URL tilgjengelig')
       }
 
-      // For text files, we can fetch directly
-      // For PDF/DOCX, we'd need a parser - for now we'll handle text files
       let fileContent = ''
 
+      // Extract the file path from the URL
+      const urlParts = manual.fil_url.split('/storage/v1/object/public/manuals/')
+      const filePath = urlParts[1] || manual.fil_url.split('/manuals/').pop()
+
+      if (!filePath) {
+        throw new Error('Kunne ikke finne filsti')
+      }
+
       if (manual.filtype === 'txt') {
-        const response = await fetch(manual.fil_url)
-        fileContent = await response.text()
+        // Download file using Supabase Storage
+        const { data: fileData, error: downloadError } = await supabase.storage
+          .from('manuals')
+          .download(filePath)
+
+        if (downloadError) {
+          throw new Error(`Kunne ikke laste ned fil: ${downloadError.message}`)
+        }
+
+        fileContent = await fileData.text()
       } else {
         // For PDF/DOCX, send a message that we need the text content
         // In a full implementation, you'd use a PDF parser
