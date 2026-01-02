@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { FileText, Upload, Trash2, Loader2 } from 'lucide-react'
+import { FileText, Upload, Trash2, Loader2, Sparkles, Eye } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { UploadModal } from '@/components/modals/UploadModal'
+import { ReviewModal } from '@/components/modals/ReviewModal'
 import { useManuals, useUploadManual, useDeleteManual } from '@/hooks/useManuals'
+import { useAnalyzeManual, useApproveAnalysis } from '@/hooks/useAnalysis'
 import { useFartoy } from '@/hooks/useFartoy'
 import { formatDate } from '@/lib/utils'
 import { cn } from '@/lib/utils'
-import type { ManualStatus } from '@/types/database'
+import type { Manual, ManualStatus } from '@/types/database'
 
 const statusLabels: Record<ManualStatus, string> = {
   lastet_opp: 'Lastet opp',
@@ -27,19 +29,20 @@ const statusColors: Record<ManualStatus, string> = {
 
 export function Manuals() {
   const [isUploadOpen, setIsUploadOpen] = useState(false)
+  const [reviewManual, setReviewManual] = useState<Manual | null>(null)
   const { data: fartoyList } = useFartoy()
   const { data: manuals, isLoading } = useManuals()
   const uploadManual = useUploadManual()
   const deleteManual = useDeleteManual()
+  const analyzeManual = useAnalyzeManual()
+  const approveAnalysis = useApproveAnalysis()
 
   const handleUpload = async (file: File, tittel: string) => {
-    // Use the first available fartoy
     const fartoyId = fartoyList?.[0]?.id
     if (!fartoyId) {
       alert('Ingen fartøy tilgjengelig. Kontakt administrator.')
       return
     }
-
     await uploadManual.mutateAsync({ file, fartoyId, tittel })
   }
 
@@ -47,6 +50,31 @@ export function Manuals() {
     if (confirm('Er du sikker på at du vil slette denne manualen?')) {
       await deleteManual.mutateAsync(id)
     }
+  }
+
+  const handleAnalyze = async (manual: Manual) => {
+    try {
+      await analyzeManual.mutateAsync(manual)
+    } catch (error) {
+      alert(`Analyse feilet: ${error instanceof Error ? error.message : 'Ukjent feil'}`)
+    }
+  }
+
+  const handleApprove = async (
+    selectedJobs: number[],
+    selectedComponents: number[],
+    selectedCertificates: number[],
+    selectedDrawings: number[]
+  ) => {
+    if (!reviewManual) return
+    await approveAnalysis.mutateAsync({
+      manual: reviewManual,
+      selectedJobs,
+      selectedComponents,
+      selectedCertificates,
+      selectedDrawings,
+    })
+    setReviewManual(null)
   }
 
   return (
@@ -135,6 +163,9 @@ export function Manuals() {
                             statusColors[manual.status]
                           )}
                         >
+                          {manual.status === 'analyserer' && (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          )}
                           {statusLabels[manual.status]}
                         </span>
                       </td>
@@ -150,15 +181,43 @@ export function Manuals() {
                       <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-300">
                         {formatDate(manual.created_at)}
                       </td>
-                      <td className="py-3 px-4 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(manual.id)}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-500/10"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* Analyze button - only show for uploaded files */}
+                          {manual.status === 'lastet_opp' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleAnalyze(manual)}
+                              disabled={analyzeManual.isPending}
+                              className="text-sky-500 hover:text-sky-700 hover:bg-sky-50 dark:hover:bg-sky-500/10"
+                            >
+                              <Sparkles className="h-4 w-4" />
+                            </Button>
+                          )}
+
+                          {/* Review button - only show for pending approval */}
+                          {manual.status === 'avventer_godkjenning' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setReviewManual(manual)}
+                              className="text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 dark:hover:bg-yellow-500/10"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          )}
+
+                          {/* Delete button */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(manual.id)}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-500/10"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -192,6 +251,15 @@ export function Manuals() {
         onClose={() => setIsUploadOpen(false)}
         onUpload={handleUpload}
         isUploading={uploadManual.isPending}
+      />
+
+      {/* Review Modal */}
+      <ReviewModal
+        isOpen={!!reviewManual}
+        onClose={() => setReviewManual(null)}
+        manual={reviewManual}
+        onApprove={handleApprove}
+        isApproving={approveAnalysis.isPending}
       />
     </div>
   )
